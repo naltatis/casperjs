@@ -25,18 +25,98 @@
  * DEALINGS IN THE SOFTWARE.
  *
  */
+(function(phantom) {
+    if (true === phantom.casperLoaded) {
+        return;
+    }
 
-var fs = require('fs');
+    phantom.casperVersion = {
+        major: 0,
+        minor: 4,
+        revision: 0,
+        toString: function() {
+            return [this.major, this.minor, this.revision].join('.');
+        }
+    };
 
-function pathJoin() {
-    return Array.prototype.join.call(arguments, fs.separator);
-}
+    var fs = require('fs');
 
-var casperLibPath = pathJoin(fs.absolute('.'), 'lib');
-phantom.injectJs(pathJoin(casperLibPath, 'casper.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'clientutils.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'colorizer.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'injector.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'tester.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'utils.js'));
-phantom.injectJs(pathJoin(casperLibPath, 'xunit.js'));
+    fs.pathJoin = function() {
+        return Array.prototype.join.call(arguments, this.separator);
+    };
+
+    phantom.extractCasperArgs = function(cliArgs) {
+        var extract = { args: [], options: {} };
+        cliArgs.forEach(function(arg) {
+            if (arg.indexOf('--') === 0) {
+                // named option
+                var optionMatch = arg.match(/^--(.*)=(.*)/i);
+                if (optionMatch) {
+                    extract.options[optionMatch[1]] = optionMatch[2];
+                } else {
+                    // flag
+                    var flagMatch = arg.match(/^--(.*)/);
+                    if (flagMatch) {
+                        extract.options[flagMatch[1]] = true;
+                    }
+                }
+            } else {
+                // positional arg
+                extract.args.push(arg);
+            }
+        });
+        return extract;
+    };
+
+    phantom.casperArgs = phantom.extractCasperArgs(phantom.args);
+    if (!phantom.casperPath) {
+        phantom.casperPath = phantom.casperArgs.options['casper-path'];
+    }
+
+    if (!phantom.casperPath) {
+        console.log('Cannot find CasperJS home path. Did you set phantom.casperPath or pass the --casper-path option?');
+        phantom.exit(1);
+    } else if (!fs.isDirectory(phantom.casperPath)) {
+        console.log('Invalid CasperJS path: ' + phantom.casperPath);
+        phantom.exit(1);
+    }
+
+    [
+        'casper.js',
+        'clientutils.js',
+        'colorizer.js',
+        'injector.js',
+        'tester.js',
+        'utils.js',
+        'xunit.js'
+    ].forEach(function(lib) {
+        phantom.injectJs(fs.pathJoin(phantom.casperPath, 'lib', lib));
+    });
+
+    phantom.casperLoaded = true;
+
+    if (true === phantom.casperArgs.options.cli) {
+        if (!!phantom.casperArgs.options.version) {
+            console.log(phantom.casperVersion.toString());
+            phantom.exit(0);
+        } else if (phantom.casperArgs.args.length === 0 || !!phantom.casperArgs.options.help) {
+            console.log('CasperJS version ' + phantom.casperVersion.toString());
+            console.log('Usage: casperjs script.(js|coffee) [options...]');
+            console.log('Read the docs http://n1k0.github.com/casperjs/');
+            phantom.exit(0);
+        }
+
+        phantom.casperScript = phantom.casperArgs.args[0];
+
+        if (!fs.isFile(phantom.casperScript)) {
+            console.log('Unable to open file: ' + phantom.casperScript);
+            phantom.exit(1);
+        }
+
+        // filter out the called script name from casper args
+        phantom.casperArgs.args = phantom.casperArgs.args.filter(function(arg) {
+            return arg !== phantom.casperScript;
+        });
+        phantom.injectJs(phantom.casperScript);
+    }
+})(phantom);
